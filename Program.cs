@@ -4,109 +4,146 @@ namespace IMJunior
     {
         static void Main(string[] args)
         {
+            PaymentSystemRegistry registry = new PaymentSystemRegistry();
             OrderForm orderForm = new OrderForm();
             PaymentHandler paymentHandler = new PaymentHandler();
-            IPaymentSystemFactory factory = new PaymentSystemFactory();
 
             try
             {
-                string systemName = orderForm.GetValidPaymentSystem(factory);
-                IPaymentSystem paymentSystem = factory.Create(systemName);
+                string systemName = orderForm.GetValidPaymentSystem(registry.GetAvailableSystems());
+                IPaymentSystemFactory factory = registry.GetFactory(systemName);
 
-                paymentSystem.ProcessPayment();
-                paymentHandler.ShowPaymentResult(paymentSystem);
+                paymentHandler.ProcessPayment(factory);
             }
             catch (ArgumentException exception)
             {
-                Console.WriteLine($"Ошибка: {exception.Message}\nПожалуйста, попробуйте снова.");
+                Console.WriteLine($"Ошибка: {exception.Message}");
+                Console.WriteLine("Пожалуйста, попробуйте снова.");
             }
         }
     }
 
     public interface IPaymentSystem
     {
-        string SystemName { get; }
         void ProcessPayment();
         void VerifyPayment();
     }
 
     public interface IPaymentSystemFactory
     {
-        IPaymentSystem Create(string systemId);
-        IEnumerable<string> GetAvailableSystems();
+        string SystemName { get; }
+        IPaymentSystem CreatePaymentSystem();
     }
 
-    public class PaymentSystem : IPaymentSystem
+    public class QiwiPaymentFactory : IPaymentSystemFactory
     {
-        public PaymentSystem(string name)
-        {
-            SystemName = name;
-        }
+        public string SystemName => "QIWI";
 
-        public string SystemName { get; }
-
-        public virtual void ProcessPayment() =>
-            Console.WriteLine($"Перевод на страницу {SystemName}...");
-
-        public virtual void VerifyPayment() =>
-            Console.WriteLine($"Проверка платежа через {SystemName}...");
+        public IPaymentSystem CreatePaymentSystem() => 
+            new QiwiPaymentSystem();
     }
 
-    public class PaymentSystemFactory : IPaymentSystemFactory 
+    public class WebMoneyPaymentFactory : IPaymentSystemFactory
     {
-        private const string Qiwi = nameof(Qiwi);
-        private const string WebMoney = nameof(WebMoney);
-        private const string Card = nameof(Card);
+        public string SystemName => "WebMoney";
 
-        private readonly Dictionary<string, string> _availableSystems = new(StringComparer.OrdinalIgnoreCase)
-        {
-            [Qiwi] = Qiwi,
-            [WebMoney] = WebMoney,
-            [Card] = Card
-        };
+        public IPaymentSystem CreatePaymentSystem() => 
+            new WebMoneyPaymentSystem();
+    }
 
-        public IPaymentSystem Create(string systemId)
-        {
-            if (_availableSystems.TryGetValue(systemId, out string systemName))
-                return new PaymentSystem(systemName);
+    public class CardPaymentFactory : IPaymentSystemFactory
+    {
+        public string SystemName => "Card";
 
-            throw new ArgumentException("Неизвестная платежная система");
-        }
+        public IPaymentSystem CreatePaymentSystem() => 
+            new CardPaymentSystem();
+    }
+
+    public class QiwiPaymentSystem : IPaymentSystem
+    {
+        public void ProcessPayment() => 
+            Console.WriteLine("Перевод на страницу QIWI...");
+        public void VerifyPayment() => 
+            Console.WriteLine("Проверка платежа через QIWI...");
+    }
+
+    public class WebMoneyPaymentSystem : IPaymentSystem
+    {
+        public void ProcessPayment() => 
+            Console.WriteLine("Вызов API WebMoney...");
+        public void VerifyPayment() => 
+            Console.WriteLine("Проверка платежа через WebMoney...");
+    }
+
+    public class CardPaymentSystem : IPaymentSystem
+    {
+        public void ProcessPayment() => 
+            Console.WriteLine("Вызов API банка эмитера карты...");
+        public void VerifyPayment() => 
+            Console.WriteLine("Проверка платежа через банк...");
+    }
+
+    public class PaymentSystemRegistry
+    {
+        private readonly List<IPaymentSystemFactory> _factories = new()
+    {
+        new QiwiPaymentFactory(),
+        new WebMoneyPaymentFactory(),
+        new CardPaymentFactory()
+    };
 
         public IEnumerable<string> GetAvailableSystems() =>
-            _availableSystems.Values.OrderBy(systemName => systemName);
+            _factories.Select(factory => factory.SystemName);
+
+        public IPaymentSystemFactory GetFactory(string systemName) =>
+            _factories.FirstOrDefault(factory => factory.SystemName.Equals(systemName, StringComparison.OrdinalIgnoreCase))
+            ?? throw new ArgumentException("Неизвестная платёжная система");
     }
 
     public class OrderForm
     {
-        public string GetValidPaymentSystem(IPaymentSystemFactory factory)
+        public string GetValidPaymentSystem(IEnumerable<string> availableSystems)
         {
-            while (true)
+            List<string> systems = availableSystems.ToList();
+            string selectedSystem = null;
+            bool isValidInput = false;
+
+            while (isValidInput == false)
             {
                 Console.Clear();
-                Console.WriteLine($"Мы принимаем: {string.Join(", ", factory.GetAvailableSystems())}\n" +
-                    $"Какой системой вы хотите совершить оплату?");
+                Console.WriteLine($"Мы принимаем: {string.Join(", ", systems)}\n" +
+                                "Какой системой вы хотите совершить оплату?");
 
-                var input = Console.ReadLine()?.Trim();
+                string input = Console.ReadLine()?.Trim() ?? "";
 
-                if (string.IsNullOrEmpty(input) == false && factory.GetAvailableSystems().Contains(input, StringComparer.OrdinalIgnoreCase))
-                    return input;
+                isValidInput = systems.Contains(input, StringComparer.OrdinalIgnoreCase);
 
-                Console.WriteLine("Неизвестная платежная система! Попробуйте еще раз.\n" +
-                    "Нажмите любую клавишу");
-                Console.ReadKey();
+                selectedSystem = isValidInput ? input : null;
+
+                if (isValidInput == false)
+                {
+                    Console.WriteLine("Неизвестная платежная система! Попробуйте еще раз.\n" +
+                                    "Нажмите любую клавишу");
+                    Console.ReadKey();
+                }
             }
+
+            return selectedSystem;
         }
     }
 
     public class PaymentHandler
     {
-        public void ShowPaymentResult(IPaymentSystem paymentSystem)
+        public void ProcessPayment(IPaymentSystemFactory factory)
         {
-            Console.WriteLine($"Вы оплатили с помощью {paymentSystem.SystemName}");
+            IPaymentSystem paymentSystem = factory.CreatePaymentSystem();
+            paymentSystem.ProcessPayment();
+            ShowPaymentResult(paymentSystem);
+        }
 
+        private void ShowPaymentResult(IPaymentSystem paymentSystem)
+        {
             paymentSystem.VerifyPayment();
-
             Console.WriteLine("Оплата прошла успешно!");
         }
     }
